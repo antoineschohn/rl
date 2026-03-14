@@ -9,6 +9,7 @@ from flock.env.types import EnvConfig, Observations
 from flock.env.rules import Rules
 from flock.env.core import reset, step
 from flock.env.obs import observe
+from flock.env.physics import pairwise_distances
 from flock.train.ppo.policy import ActorCritic, flatten_obs
 
 
@@ -18,7 +19,7 @@ def _gaussian_log_prob(mean, log_std, actions):
     return -0.5 * (jnp.log(2 * jnp.pi) + 2 * log_std + (actions - mean) ** 2 / var).sum(axis=-1)
 
 
-def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas):
+def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, distance_coeff=0.01):
     """Collect trajectories. Returns flat arrays over (n_arenas, T, n_predators)."""
     n_teams = len(rules.teams)
     prey_ps = prey_policy.init_state()
@@ -43,6 +44,19 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas):
         # Step
         new_state, info = step(env_config, rules, state, (pred_actions, prey_actions))
 
+        # Dense reward: negative distance to nearest alive prey
+        dists = pairwise_distances(new_state.teams[0].pos, new_state.teams[1].pos, env_config.arena_size)
+        # Mask dead prey with inf so they don't attract
+        dists = jnp.where(new_state.teams[1].alive[None, :], dists, jnp.inf)
+        nearest_dist = dists.min(axis=1)  # (n_predators,)
+        distance_reward = -distance_coeff * nearest_dist
+
+        pred_reward = info.rewards[0] + distance_reward  # (n_predators,)
+
+        # Mask rewards after done
+        alive_mask = (1 - done.astype(jnp.float32))
+        pred_reward = pred_reward * alive_mask
+
         # Freeze on done
         done = done | info.done
         state = jax.tree.map(
@@ -50,9 +64,7 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas):
             state, new_state,
         )
 
-        pred_reward = info.rewards[0]  # (n_predators,)
-
-        return (state, done, key, new_prey_ps), (pred_obs, pred_actions, log_prob, value, pred_reward, done)
+        return (state, done, key, new_prey_ps), (pred_obs, pred_actions, log_prob, value, pred_reward, done, info.rewards[0] * alive_mask)
 
     def single_episode(key):
         key, reset_key = jax.random.split(key)
@@ -143,7 +155,7 @@ def train(
         key, rollout_key = jax.random.split(key)
 
         # Collect rollout
-        obs, actions, log_probs, values, rewards, dones = collect_rollout(
+        obs, actions, log_probs, values, rewards, dones, catch_rewards = collect_rollout(
             env_config, rules, policy, prey_policy, rollout_key, n_arenas,
         )
         # obs is a NamedTuple of (n_arenas, T, n_agents, ...) — flatten obs for loss
@@ -174,7 +186,8 @@ def train(
                 policy, opt_state, obs_b, act_b, lp_b, adv_b, ret_b, optimizer,
             )
 
-        mean_reward = rewards.sum(axis=1).mean()  # mean total episode reward across arenas
-        print(f"iter {i:4d} | loss {loss:.4f} | mean_reward {mean_reward:.2f}")
+        mean_reward = rewards.sum(axis=1).mean()
+        mean_catches = catch_rewards.sum(axis=1).mean()
+        print(f"iter {i:4d} | loss {loss:.4f} | reward {mean_reward:.2f} | catches {mean_catches:.2f}")
 
     return policy

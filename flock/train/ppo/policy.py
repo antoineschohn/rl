@@ -33,7 +33,7 @@ class ActorCritic(Policy):
         k1, k2, k3 = jax.random.split(key, 3)
         self.trunk = eqx.nn.MLP(in_dim, hidden, width_size=hidden, depth=2, key=k1)
         self.actor_mean = eqx.nn.Linear(hidden, 2, key=k2)
-        self.actor_log_std = jnp.zeros(2)
+        self.actor_log_std = jnp.ones(2)  # std ≈ 2.7, reasonable for max_accel ~ 8
         self.critic = eqx.nn.Linear(hidden, 1, key=k3)
 
     def evaluate(self, obs: Observations) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
