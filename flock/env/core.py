@@ -1,15 +1,10 @@
 import jax
 import jax.numpy as jnp
 
-from typing import Callable
-
 from flock.env.types import Agents, EnvConfig, EnvState, EnvStates, Observations, Policy, PolicyState, RngKey, Simulation, Simulations, StepInfo, TeamConfig
 from flock.env.rules import Rules
 from flock.env.physics import integrate, wrap_position, clamp_magnitude
 from flock.env.obs import observe
-
-# Hook called each step: (obs_per_team, actions_per_team, state, info) -> pytree
-StepHook = Callable | None
 
 
 def reset(env_config: EnvConfig, rules: Rules, key: RngKey) -> EnvState:
@@ -33,6 +28,7 @@ def step(
     actions: tuple[jax.Array, ...],
 ) -> tuple[EnvState, StepInfo]:
     """One environment step. Pure function."""
+
     n_teams = len(rules.teams)
 
     # Clamp accelerations and mask dead agents
@@ -63,70 +59,54 @@ def step(
     return new_state, StepInfo(rewards=rewards, done=done)
 
 
-class RandomPolicy(Policy):
-    """Stateless policy that applies random accelerations scaled to max_accel."""
-    n_agents: int
-    max_accel: float
-
-    def __init__(self, team_config: TeamConfig):
-        self.n_agents = team_config.n_agents
-        self.max_accel = team_config.max_accel
-
-    def __call__(self, obs: Observations, key: RngKey, state: PolicyState) -> tuple[jax.Array, PolicyState]:
-        return jax.random.normal(key, (self.n_agents, 2)) * self.max_accel, state
-
-
 def run_episodes(
     env_config: EnvConfig,
     rules: Rules,
     key: RngKey,
     policies: tuple[Policy, ...],
     n_arenas: int,
-    step_hook: StepHook = None,
 ) -> Simulations:
     """Run n_arenas episodes in parallel via vmap.
 
     Args:
         policies: one Policy per team, in team order.
-        step_hook: optional callback (obs_per_team, actions_per_team, state, info) -> pytree.
 
-    Returns a Simulation with batch dimension prepended.
+    Returns a Simulations with batch dimension prepended.
     """
     n_teams = len(rules.teams)
-    ps_inits = tuple(p.init_state() for p in policies)
+    policy_states_init = tuple(p.init_state() for p in policies)
+
+    def episode_step(carry, _):
+        state, done, key, policy_states = carry
+        keys = jax.random.split(key, n_teams + 1)
+        key = keys[0]
+
+        # Observe and act for each team
+        obs_all = tuple(observe(rules, env_config, state, i) for i in range(n_teams))
+        actions_and_states = tuple(
+            policies[i](obs_all[i], keys[i + 1], policy_states[i])
+            for i in range(n_teams)
+        )
+        team_actions = tuple(a for a, _ in actions_and_states)
+        new_policy_states = tuple(s for _, s in actions_and_states)
+
+        new_state, info = step(env_config, rules, state, team_actions)
+
+        # Freeze state once done
+        done = done | info.done
+        state = jax.tree.map(
+            lambda old, new: jnp.where(done, old, new),
+            state, new_state,
+        )
+
+        return (state, done, key, new_policy_states), (state, info)
 
     def single_episode(key):
         key, reset_key = jax.random.split(key)
         init_state = reset(env_config, rules, reset_key)
 
-        def scan_fn(carry, _):
-            state, done, key, ps = carry
-            keys = jax.random.split(key, n_teams + 1)
-            key = keys[0]
-
-            # Observe and act for each team
-            obs_all = tuple(observe(rules, env_config, state, i) for i in range(n_teams))
-            actions_and_ps = tuple(
-                policies[i](obs_all[i], keys[i + 1], ps[i])
-                for i in range(n_teams)
-            )
-            team_actions = tuple(a for a, _ in actions_and_ps)
-            new_ps = tuple(s for _, s in actions_and_ps)
-
-            new_state, info = step(env_config, rules, state, team_actions)
-
-            # Freeze state once done
-            done = done | info.done
-            state = jax.tree.map(
-                lambda old, new: jnp.where(done, old, new),
-                state, new_state,
-            )
-
-            extras = step_hook(obs_all, team_actions, state, info) if step_hook else None
-            return (state, done, key, new_ps), (state, info, extras)
-
-        init_carry = (init_state, jnp.bool_(False), key, ps_inits)
-        _, (states, infos, extras) = jax.lax.scan(scan_fn, init_carry, None, length=env_config.max_steps)
+        init_carry = (init_state, jnp.bool_(False), key, policy_states_init)
+        _, (states, infos) = jax.lax.scan(episode_step, init_carry, None, length=env_config.max_steps)
 
         # Prepend initial state
         all_states = jax.tree.map(
@@ -137,17 +117,15 @@ def run_episodes(
         return (
             EnvStates(teams=all_states.teams, step_id=all_states.step_id),
             infos,
-            extras,
         )
 
     keys = jax.random.split(key, n_arenas)
-    states, infos, extras = jax.vmap(single_episode)(keys)
+    states, infos = jax.vmap(single_episode)(keys)
     return Simulations(
         env_config=env_config,
         rules=rules,
         states=states,
         infos=infos,
-        extras=extras,
     )
 
 
@@ -165,5 +143,4 @@ def run_episode(
         rules=sims.rules,
         states=jax.tree.map(squeeze, sims.states),
         infos=jax.tree.map(squeeze, sims.infos),
-        extras=jax.tree.map(squeeze, sims.extras) if sims.extras is not None else None,
     )

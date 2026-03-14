@@ -95,7 +95,6 @@ class Simulation(NamedTuple):
     rules: object            # the Rules module used
     states: EnvStates        # (T+1, ...) — includes initial state at t=0
     infos: StepInfo          # (T, ...) — infos[t] = step(states[t]).info
-    extras: object = None    # arbitrary pytree from step_hook, stacked over time (T, ...)
 
 
 class Simulations(NamedTuple):
@@ -104,7 +103,6 @@ class Simulations(NamedTuple):
     rules: object
     states: EnvStates        # (n_arenas, T+1, ...)
     infos: StepInfo          # (n_arenas, T, ...)
-    extras: object = None    # (n_arenas, T, ...)
 
 
 def unbatch(sims: Simulations) -> list[Simulation]:
@@ -116,7 +114,6 @@ def unbatch(sims: Simulations) -> list[Simulation]:
             rules=sims.rules,
             states=jax.tree.map(lambda x: x[i], sims.states),
             infos=jax.tree.map(lambda x: x[i], sims.infos),
-            extras=jax.tree.map(lambda x: x[i], sims.extras) if sims.extras is not None else None,
         )
         for i in range(n)
     ]
@@ -129,5 +126,4 @@ def batch(sims: list[Simulation]) -> Simulations:
         rules=sims[0].rules,
         states=jax.tree.map(lambda *xs: jnp.stack(xs), *[s.states for s in sims]),
         infos=jax.tree.map(lambda *xs: jnp.stack(xs), *[s.infos for s in sims]),
-        extras=jax.tree.map(lambda *xs: jnp.stack(xs), *[s.extras for s in sims]) if sims[0].extras is not None else None,
     )
