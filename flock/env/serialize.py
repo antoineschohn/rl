@@ -26,8 +26,8 @@ def save(sim, path):
     arrays["states/step_id"] = np.asarray(sim.states.step_id)
 
     # Flatten infos
-    for i, r in enumerate(sim.infos.rewards):
-        arrays[f"infos/rewards/{i}"] = np.asarray(r)
+    for i, r in enumerate(sim.infos.scores):
+        arrays[f"infos/scores/{i}"] = np.asarray(r)
     arrays["infos/done"] = np.asarray(sim.infos.done)
 
     # Save env_config as JSON string in a separate sidecar
@@ -63,7 +63,7 @@ def load(path):
     )
     states = EnvStates(teams=teams, step_id=data["states/step_id"])
 
-    rewards = tuple(data[f"infos/rewards/{i}"] for i in range(n_teams))
-    infos = StepInfo(rewards=rewards, done=data["infos/done"])
+    scores = tuple(data[f"infos/scores/{i}"] for i in range(n_teams))
+    infos = StepInfo(scores=scores, done=data["infos/done"])
 
     return Simulation(env_config=env_config, rules=None, states=states, infos=infos)

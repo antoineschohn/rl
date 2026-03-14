@@ -52,7 +52,7 @@ def test_predator_catches_prey():
     actions = tuple(jnp.zeros((tc.n_agents, 2)) for tc in inter.teams)
     new_state, info = step(cfg, inter, state, actions)
     assert not new_state.teams[1].alive[0]
-    assert info.rewards[0][0] > 0
+    assert info.scores[0][0] > 0
 
 
 def test_done_at_max_steps():

@@ -71,7 +71,7 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
         nearest_dist = jnp.minimum(dists.min(axis=1), env_config.arena_size)  # (n_predators,)
         distance_reward = -distance_coeff * nearest_dist / env_config.max_steps
 
-        pred_reward = info.rewards[0] + distance_reward  # (n_predators,)
+        pred_reward = info.scores[0] + distance_reward  # (n_predators,)
 
         # Mask rewards after done
         alive_mask = (1 - done.astype(jnp.float32))
@@ -84,7 +84,7 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
             state, new_state,
         )
 
-        return (state, done, key, new_prey_ps), (pred_obs, pred_actions, log_prob, value, pred_reward, done, info.rewards[0] * alive_mask)
+        return (state, done, key, new_prey_ps), (pred_obs, pred_actions, log_prob, value, pred_reward, done, info.scores[0] * alive_mask)
 
     def single_episode(key):
         key, reset_key = jax.random.split(key)

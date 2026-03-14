@@ -74,7 +74,7 @@ def plot_stats(sim: Simulation):
 
     # Cumulative rewards
     for i, tc in enumerate(rules.teams):
-        reward_per_step = infos.rewards[i].sum(axis=-1)  # sum across agents
+        reward_per_step = infos.scores[i].sum(axis=-1)  # sum across agents
         cumulative = jnp.cumsum(reward_per_step)
         color = TEAM_COLORS[i % len(TEAM_COLORS)]
         axes[1].plot(cumulative, color=color, label=tc.name)

@@ -1,4 +1,4 @@
-"""Game rules: teams, catches, rewards, done condition."""
+"""Game rules: teams, catches, scores, done condition."""
 
 import equinox as eqx
 import jax
@@ -13,7 +13,7 @@ class Rules(eqx.Module):
     teams: tuple[TeamConfig, ...]
 
     def interact(self, env_config: EnvConfig, teams: tuple[Agents, ...]) -> tuple[tuple[Agents, ...], tuple[jax.Array, ...]]:
-        """Apply rules after physics. Returns (updated_teams, rewards_per_team)."""
+        """Apply rules after physics. Returns (updated_teams, scores_per_team)."""
         raise NotImplementedError
 
     def is_done(self, teams: tuple[Agents, ...]) -> jax.Array:
@@ -53,12 +53,12 @@ class PredatorPrey(Rules):
         new_prey_alive = prey.alive & ~caught
 
         # +1 for each predator within catch_radius of a caught prey (not split)
-        pred_reward = catch_mask.sum(axis=1).astype(jnp.float32)
+        pred_score = catch_mask.sum(axis=1).astype(jnp.float32)
         # +1 per step alive, 0 when dead
-        prey_reward = prey.alive.astype(jnp.float32)
+        prey_score = prey.alive.astype(jnp.float32)
 
         new_prey = prey._replace(alive=new_prey_alive)
-        return (predators, new_prey), (pred_reward, prey_reward)
+        return (predators, new_prey), (pred_score, prey_score)
 
     def is_done(self, teams: tuple[Agents, ...]) -> jax.Array:
         """Done when all prey are dead."""

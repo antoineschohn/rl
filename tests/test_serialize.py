@@ -22,5 +22,5 @@ def test_save_load_roundtrip(tmp_path):
         assert jnp.allclose(orig.vel, loaded.vel)
         assert (orig.alive == loaded.alive).all()
     assert (sim.states.step_id == sim2.states.step_id).all()
-    assert jnp.allclose(sim.infos.rewards[0], sim2.infos.rewards[0])
+    assert jnp.allclose(sim.infos.scores[0], sim2.infos.scores[0])
     assert (sim.infos.done == sim2.infos.done).all()

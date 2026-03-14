@@ -85,7 +85,7 @@ class EnvStates(NamedTuple):
 
 class StepInfo(NamedTuple):
     """Output of a single environment step."""
-    rewards: tuple[jax.Array, ...]  # rewards[i] shape (n_agents_i,)
+    scores: tuple[jax.Array, ...]   # scores[i] shape (n_agents_i,)
     done: jnp.ndarray               # scalar bool
 
 

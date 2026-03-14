@@ -48,15 +48,15 @@ def step(
         new_teams.append(Agents(pos=pos, vel=vel, alive=state.teams[i].alive))
     new_teams = tuple(new_teams)
 
-    # Apply rules (catches, rewards)
-    new_teams, rewards = rules.interact(env_config, new_teams)
+    # Apply rules (catches, scores)
+    new_teams, scores = rules.interact(env_config, new_teams)
 
     # Done condition
     new_step = state.step_id + 1
     done = (new_step >= env_config.max_steps) | rules.is_done(new_teams)
 
     new_state = EnvState(teams=new_teams, step_id=new_step)
-    return new_state, StepInfo(rewards=rewards, done=done)
+    return new_state, StepInfo(scores=scores, done=done)
 
 
 def run_episodes(
