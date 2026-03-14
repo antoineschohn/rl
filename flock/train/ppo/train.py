@@ -48,7 +48,7 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
         dists = pairwise_distances(new_state.teams[0].pos, new_state.teams[1].pos, env_config.arena_size)
         # Mask dead prey with inf so they don't attract
         dists = jnp.where(new_state.teams[1].alive[None, :], dists, jnp.inf)
-        nearest_dist = dists.min(axis=1)  # (n_predators,)
+        nearest_dist = jnp.minimum(dists.min(axis=1), env_config.arena_size)  # (n_predators,)
         distance_reward = -distance_coeff * nearest_dist
 
         pred_reward = info.rewards[0] + distance_reward  # (n_predators,)
