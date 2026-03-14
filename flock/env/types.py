@@ -94,3 +94,4 @@ class Simulation(NamedTuple):
     config: EnvConfig
     states: EnvStates    # (T+1, ...) — includes initial state at t=0
     infos: StepInfo      # (T, ...) — infos[t] = step(states[t]).info
+    extras: object = None  # arbitrary pytree from step_hook, stacked over time (T, ...)

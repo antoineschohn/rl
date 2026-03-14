@@ -2,7 +2,12 @@ import jax
 import jax.numpy as jnp
 
 
+from typing import Callable
+
 from flock.env.types import Agent, Agents, EnvConfig, EnvState, EnvStates, Observations, Policy, PolicyState, RngKey, Simulation, StepInfo
+
+# Hook called each step: (pred_obs, prey_obs, pred_actions, prey_actions, state, info) -> pytree
+StepHook = Callable | None
 from flock.env.physics import integrate, wrap_position, clamp_magnitude
 from flock.env.reward import compute_catches, predator_reward, prey_reward
 from flock.env.obs import observe
@@ -90,8 +95,14 @@ def run_episodes(
     pred_policy: Policy,
     prey_policy: Policy,
     n_arenas: int,
+    step_hook: StepHook = None,
 ) -> Simulation:
     """Run n_arenas episodes in parallel via vmap. Same config and policies, different seeds.
+
+    Args:
+        step_hook: optional callback called each step with
+            (pred_obs, prey_obs, pred_actions, prey_actions, state, info) -> pytree.
+            The returned pytree is stacked over time and stored in sim.extras.
 
     Returns a Simulation with batch dimension prepended:
     e.g. states.predators.pos has shape (n_arenas, T, n_pred, 2).
@@ -125,10 +136,11 @@ def run_episodes(
                 state, new_state,
             )
 
-            return (state, done, key, ps_pred, ps_prey), (state, info)
+            extras = step_hook(pred_obs, prey_obs, pred_a, prey_a, state, info) if step_hook else None
+            return (state, done, key, ps_pred, ps_prey), (state, info, extras)
 
         init_carry = (init_state, jnp.bool_(False), key, pred_ps_init, prey_ps_init)
-        _, (states, infos) = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
+        _, (states, infos, extras) = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
 
         # Prepend initial state (no info for t=0)
         all_states = jax.tree.map(
@@ -151,7 +163,8 @@ def run_episodes(
                 ),
                 step_id=all_states.step_id,
             ),
-            infos=infos,  # StepInfo stacked over time: (T, ...)
+            infos=infos,
+            extras=extras,
         )
 
     keys = jax.random.split(key, n_arenas)
