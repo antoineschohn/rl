@@ -54,11 +54,9 @@ class PredatorPrey(Rules):
 
         # +1 for each predator within catch_radius of a caught prey (not split)
         pred_score = catch_mask.sum(axis=1).astype(jnp.float32)
-        # +1 per step alive, 0 when dead
-        prey_score = prey.alive.astype(jnp.float32)
 
         new_prey = prey._replace(alive=new_prey_alive)
-        return (predators, new_prey), (pred_score, prey_score)
+        return (predators, new_prey), (pred_score, jnp.zeros(prey.pos.shape[0]))
 
     def is_done(self, teams: tuple[Agents, ...]) -> jax.Array:
         """Done when all prey are dead."""
