@@ -28,7 +28,15 @@ uv pip install -e .
 ### 3. Run tests
 
 ```bash
-uv run pytest
+uv run pytest --benchmark-skip        # tests only, skip benchmarks
+uv run pytest tests/test_perf.py --benchmark-only  # benchmarks only
+uv run pytest                         # everything
+```
+
+Save a benchmark baseline and compare later:
+```bash
+uv run pytest tests/test_perf.py --benchmark-only --benchmark-save=baseline
+uv run pytest tests/test_perf.py --benchmark-only --benchmark-compare
 ```
 
 
