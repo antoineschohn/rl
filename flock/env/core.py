@@ -26,11 +26,6 @@ def reset(env_config: EnvConfig, rules: Rules, key: RngKey) -> EnvState:
     return EnvState(teams=teams, step_id=jnp.int32(0))
 
 
-class StepResult:
-    """Intermediate result before building StepInfo — avoids circular issues."""
-    pass
-
-
 def step(
     env_config: EnvConfig,
     rules: Rules,
@@ -88,7 +83,7 @@ def run_episodes(
     policies: tuple[Policy, ...],
     n_arenas: int,
     step_hook: StepHook = None,
-) -> Simulation:
+) -> Simulations:
     """Run n_arenas episodes in parallel via vmap.
 
     Args:
