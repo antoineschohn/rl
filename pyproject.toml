@@ -1,7 +1,21 @@
 [project]
-name = "project"
+name = "flock"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-agent predator-prey RL"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "jax[cpu]",
+    "equinox",
+    "optax",
+    "jaxtyping",
+    "matplotlib",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
