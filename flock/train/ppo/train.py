@@ -19,7 +19,7 @@ def _gaussian_log_prob(mean, log_std, actions):
     return -0.5 * (jnp.log(2 * jnp.pi) + 2 * log_std + (actions - mean) ** 2 / var).sum(axis=-1)
 
 
-def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, distance_coeff=0.01):
+def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, distance_coeff=1.0):
     """Collect trajectories. Returns flat arrays over (n_arenas, T, n_predators)."""
     n_teams = len(rules.teams)
     prey_ps = prey_policy.init_state()
@@ -49,7 +49,7 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
         # Mask dead prey with inf so they don't attract
         dists = jnp.where(new_state.teams[1].alive[None, :], dists, jnp.inf)
         nearest_dist = jnp.minimum(dists.min(axis=1), env_config.arena_size)  # (n_predators,)
-        distance_reward = -distance_coeff * nearest_dist
+        distance_reward = -distance_coeff * nearest_dist / env_config.max_steps
 
         pred_reward = info.rewards[0] + distance_reward  # (n_predators,)
 
