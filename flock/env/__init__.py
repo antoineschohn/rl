@@ -2,6 +2,7 @@ from flock.env.types import Agent, Agents, EnvConfig, EnvState, EnvStates, Obser
 from flock.env.core import reset, step, run_episode, run_episodes
 from flock.env.obs import observe
 from flock.env.rules import Rules, PredatorPrey
+from flock.env.serialize import save, load
 from flock.train.random import RandomPolicy  # re-export for backward compat
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "observe",
     "Rules", "PredatorPrey",
     "RandomPolicy",
+    "save", "load",
 ]

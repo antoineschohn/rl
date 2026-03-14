@@ -92,7 +92,7 @@ class StepInfo(NamedTuple):
 class Simulation(NamedTuple):
     """A single simulation run."""
     env_config: EnvConfig
-    rules: object            # the Rules module used
+    rules: 'Rules'            # the Rules module used
     states: EnvStates        # (T+1, ...) — includes initial state at t=0
     infos: StepInfo          # (T, ...) — infos[t] = step(states[t]).info
 
@@ -100,7 +100,7 @@ class Simulation(NamedTuple):
 class Simulations(NamedTuple):
     """Batched simulation runs. All data arrays have a leading (n_arenas,) dimension."""
     env_config: EnvConfig
-    rules: object
+    rules: 'Rules'
     states: EnvStates        # (n_arenas, T+1, ...)
     infos: StepInfo          # (n_arenas, T, ...)
 
