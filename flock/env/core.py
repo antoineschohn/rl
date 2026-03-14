@@ -98,12 +98,16 @@ def run_episode(
     pred_policy: PolicyFn,
     prey_policy: PolicyFn,
 ) -> Simulation:
-    """Run one episode, return a Simulation (config + time-stacked states)."""
-    key, reset_key = jax.random.split(key)
-    state = reset(config, reset_key)
-    states = [state]
+    """Run one episode via lax.scan. Returns a Simulation (config + time-stacked states).
 
-    for t in range(config.max_steps):
+    Once done, state freezes — the scan runs for max_steps unconditionally
+    but stops mutating state after the episode ends.
+    """
+    key, reset_key = jax.random.split(key)
+    init_state = reset(config, reset_key)
+
+    def scan_fn(carry, _):
+        state, done, key = carry
         key, k1, k2 = jax.random.split(key, 3)
 
         pred_obs = observe(config, state, "predators")
@@ -112,25 +116,39 @@ def run_episode(
         pred_a = pred_policy(pred_obs, k1)
         prey_a = prey_policy(prey_obs, k2)
 
-        state, info = step(config, state, pred_a, prey_a)
-        states.append(state)
+        new_state, info = step(config, state, pred_a, prey_a)
 
-        if info.done:
-            break
+        # Freeze state once done — keep old state, accumulate done flag
+        done = done | info.done
+        state = jax.tree.map(
+            lambda old, new: jnp.where(done, old, new),
+            state, new_state,
+        )
+
+        return (state, done, key), state
+
+    init_carry = (init_state, jnp.bool_(False), key)
+    _, states = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
+
+    # Prepend initial state
+    all_states = jax.tree.map(
+        lambda init, scanned: jnp.concatenate([init[None], scanned], axis=0),
+        init_state, states,
+    )
 
     return Simulation(
         config=config,
         states=EnvStates(
             predators=Agents(
-                pos=jnp.stack([s.predators.pos for s in states]),
-                vel=jnp.stack([s.predators.vel for s in states]),
-                alive=jnp.stack([s.predators.alive for s in states]),
+                pos=all_states.predators.pos,
+                vel=all_states.predators.vel,
+                alive=all_states.predators.alive,
             ),
             prey=Agents(
-                pos=jnp.stack([s.prey.pos for s in states]),
-                vel=jnp.stack([s.prey.vel for s in states]),
-                alive=jnp.stack([s.prey.alive for s in states]),
+                pos=all_states.prey.pos,
+                vel=all_states.prey.vel,
+                alive=all_states.prey.alive,
             ),
-            step_id=jnp.stack([s.step_id for s in states]),
+            step_id=all_states.step_id,
         ),
     )
