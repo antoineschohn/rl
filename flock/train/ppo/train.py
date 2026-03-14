@@ -11,7 +11,6 @@ from flock.env.types import EnvConfig
 from flock.env.rules import Rules
 from flock.env.core import reset, step
 from flock.env.obs import observe
-from flock.env.physics import pairwise_distances
 from flock.train.ppo.policy import ActorCritic, flatten_obs
 
 
@@ -40,7 +39,7 @@ def _gaussian_log_prob(mean, log_std, actions):
     return -0.5 * (jnp.log(2 * jnp.pi) + 2 * log_std + (actions - mean) ** 2 / var).sum(axis=-1)
 
 
-def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, distance_coeff=1.0):
+def collect_rollout(env_config, rules, policy, prey_policy, reward_fn, key, n_arenas):
     """Collect trajectories. Returns flat arrays over (n_arenas, T, n_predators) + last_values for bootstrap."""
     prey_ps = prey_policy.init_state()
 
@@ -64,14 +63,8 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
         # Step
         new_state, info = step(env_config, rules, state, (pred_actions, prey_actions))
 
-        # Dense reward: negative distance to nearest alive prey
-        dists = pairwise_distances(new_state.teams[0].pos, new_state.teams[1].pos, env_config.arena_size)
-        # Mask dead prey with inf so they don't attract
-        dists = jnp.where(new_state.teams[1].alive[None, :], dists, jnp.inf)
-        nearest_dist = jnp.minimum(dists.min(axis=1), env_config.arena_size)  # (n_predators,)
-        distance_reward = -distance_coeff * nearest_dist / env_config.max_steps
-
-        pred_reward = info.scores[0] + distance_reward  # (n_predators,)
+        # Reward
+        pred_reward = reward_fn(env_config, rules, state, new_state, info, team_idx=0)
 
         # Mask rewards after done
         alive_mask = (1 - done.astype(jnp.float32))
@@ -165,6 +158,7 @@ def train(
     rules: Rules,
     policy: ActorCritic,
     prey_policy,
+    reward_fn,
     key,
     cfg: PPOConfig,
 ):
@@ -180,7 +174,7 @@ def train(
 
         # Collect rollout
         (obs, actions, log_probs, values, rewards, dones, catch_rewards), last_values = collect_rollout(
-            env_config, rules, policy, prey_policy, rollout_key, cfg.n_arenas,
+            env_config, rules, policy, prey_policy, reward_fn, rollout_key, cfg.n_arenas,
         )
 
         # Flatten obs — (n_arenas, T, n_agents, obs_dim)
