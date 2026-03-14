@@ -1,7 +1,8 @@
 """State and configuration types for the flock environment."""
 
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -38,9 +39,19 @@ class Observations(NamedTuple):
 
 
 RngKey = jax.Array  # alias for readability — JAX PRNG state, create with jax.random.key(seed)
-PolicyFn = Callable[[Observations, RngKey], jax.Array]  # obs, key -> (n_agents, 2)
-# TODO: support stateful policies 
-#StatefulPolicyFn = Callable[[Observations, RngKey], [jax.Array, State]]  # obs, key -> ((n_agents, 2), state)
+PolicyState = jax.Array | None  # arbitrary pytree carried across steps, None for stateless
+
+
+class Policy(eqx.Module):
+    """Base class for policies. Subclass and implement __call__ and init_state."""
+
+    def __call__(self, obs: Observations, key: RngKey, state: PolicyState) -> tuple[jax.Array, PolicyState]:
+        """Return (actions, new_state). Actions shape: (n_agents, 2)."""
+        raise NotImplementedError
+
+    def init_state(self) -> PolicyState:
+        """Return initial policy state. None for stateless policies."""
+        return None
 
 class EnvConfig(NamedTuple):
     """Environment parameters. Immutable across an episode."""

@@ -2,13 +2,13 @@
 
 import jax
 
-from flock.env import EnvConfig, run_episode, run_episodes, random_policy
+from flock.env import EnvConfig, RandomPolicy, run_episode, run_episodes
 
 
 def _make_runner(config: EnvConfig, n_arenas: int = 1):
     """Return a callable that runs episode(s) (pre-warmed)."""
-    pred_pol = random_policy(config.n_predators)
-    prey_pol = random_policy(config.n_prey)
+    pred_pol = RandomPolicy(config.n_predators)
+    prey_pol = RandomPolicy(config.n_prey)
     if n_arenas == 1:
         _ = run_episode(config, jax.random.key(0), pred_pol, prey_pol)
         def run():

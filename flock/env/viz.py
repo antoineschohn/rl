@@ -48,13 +48,14 @@ def animate(sim: Simulation, interval: int = 50):
 
 if __name__ == "__main__":
     import jax
-    from flock.env.core import run_episode, random_policy
+    from flock.env.core import run_episode
     from flock.env.types import EnvConfig
 
+    from flock.env.core import RandomPolicy
     config = EnvConfig()
     sim = run_episode(
         config, jax.random.key(42),
-        pred_policy=random_policy(config.n_predators),
-        prey_policy=random_policy(config.n_prey),
+        pred_policy=RandomPolicy(config.n_predators),
+        prey_policy=RandomPolicy(config.n_prey),
     )
     animate(sim)
