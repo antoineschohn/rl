@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 
 from flock.env.types import Agents, EnvConfig, EnvState, Observations
+from flock.env.rules import Rules
 from flock.env.physics import pairwise_deltas
 
 
@@ -19,15 +20,13 @@ def _k_nearest(deltas: jnp.ndarray, rel_vel: jnp.ndarray, alive: jnp.ndarray, k:
     Returns:
         (k, 4) — relative pos + vel of k-nearest, zero-padded
     """
-    dists = jnp.linalg.norm(deltas, axis=-1)  # (n_others,)
-    # Dead/masked agents get infinite distance
+    dists = jnp.linalg.norm(deltas, axis=-1)
     dists = jnp.where(alive, dists, jnp.inf)
     nearest_idx = jnp.argsort(dists)[:k]
-    rel_pos = deltas[nearest_idx]          # (k, 2)
-    rel_v = rel_vel[nearest_idx]           # (k, 2)
-    result = jnp.concatenate([rel_pos, rel_v], axis=-1)  # (k, 4)
-    # Zero out invalid slots
-    valid = alive[nearest_idx][:, None]    # (k, 1)
+    rel_pos = deltas[nearest_idx]
+    rel_v = rel_vel[nearest_idx]
+    result = jnp.concatenate([rel_pos, rel_v], axis=-1)
+    valid = alive[nearest_idx][:, None]
     return result * valid
 
 
@@ -48,41 +47,30 @@ def _observe_one_agent(
     return own_vel, teammates, opponents
 
 
-def observe(config: EnvConfig, state: EnvState, team: str) -> Observations:
-    """Extract observations for a team. Policies only see this, never EnvState.
-
-    Args:
-        team: "predators" or "prey"
-    """
-    if team == "predators":
-        us = state.predators
-        them = state.prey
-    else:
-        us = state.prey
-        them = state.predators
-
+def observe(rules: Rules, env_config: EnvConfig, state: EnvState, team_idx: int) -> Observations:
+    """Extract observations for a team. Policies only see this, never EnvState."""
+    tc = rules.teams[team_idx]
+    us = state.teams[team_idx]
     n_us = us.pos.shape[0]
 
-    # (n_us, n_us, 2) — from each agent to each teammate
-    teammate_deltas = pairwise_deltas(us.pos, us.pos, config.arena_size)
-    # Relative velocities: teammate_vel - own_vel
-    # (n_us, 1, 2) broadcast with (1, n_us, 2) -> (n_us, n_us, 2)
+    # Teammates: same team
+    teammate_deltas = pairwise_deltas(us.pos, us.pos, env_config.arena_size)
     teammate_rel_vel = us.vel[None, :, :] - us.vel[:, None, :]
+    self_mask = ~jnp.eye(n_us, dtype=jnp.bool_)
+    teammate_alive = us.alive[None, :] & self_mask
 
-    # Exclude self: mask diagonal as not-alive
-    self_mask = ~jnp.eye(n_us, dtype=jnp.bool_)  # (n_us, n_us) True=valid
-    teammate_alive = us.alive[None, :] & self_mask  # (n_us, n_us)
+    # Opponents: all other teams concatenated
+    other_indices = [j for j in range(len(rules.teams)) if j != team_idx]
+    others_pos = jnp.concatenate([state.teams[j].pos for j in other_indices], axis=0)
+    others_vel = jnp.concatenate([state.teams[j].vel for j in other_indices], axis=0)
+    others_alive = jnp.concatenate([state.teams[j].alive for j in other_indices], axis=0)
 
-    # (n_us, n_them, 2) — from each of us to each opponent
-    # pairwise_deltas(a, b) = a[:, None] - b[None, :], so we want them in rows, us in cols
-    opponent_deltas = pairwise_deltas(them.pos, us.pos, config.arena_size)  # (n_them, n_us, 2)
-    opponent_deltas = jnp.transpose(opponent_deltas, (1, 0, 2))  # (n_us, n_them, 2)
-    # Relative velocities: opponent_vel - own_vel
-    opponent_rel_vel = them.vel[None, :, :] - us.vel[:, None, :]  # (n_us, n_them, 2)
-    # (n_us, n_them) — broadcast alive mask
-    opponent_alive = jnp.broadcast_to(them.alive[None, :], (n_us, them.pos.shape[0]))
+    opponent_deltas_raw = pairwise_deltas(others_pos, us.pos, env_config.arena_size)  # (n_others, n_us, 2)
+    opponent_deltas = jnp.transpose(opponent_deltas_raw, (1, 0, 2))  # (n_us, n_others, 2)
+    opponent_rel_vel = others_vel[None, :, :] - us.vel[:, None, :]  # (n_us, n_others, 2)
+    n_others = others_pos.shape[0]
+    opponent_alive = jnp.broadcast_to(others_alive[None, :], (n_us, n_others))
 
-    # vmap over agents in the team (axis 0 of all per-agent arrays)
     own_vel, teammates, opponents = jax.vmap(
         _observe_one_agent,
         in_axes=(0, 0, 0, 0, 0, 0, 0, None, None),
@@ -94,8 +82,8 @@ def observe(config: EnvConfig, state: EnvState, team: str) -> Observations:
         opponent_deltas,
         opponent_rel_vel,
         opponent_alive,
-        config.k_teammates,
-        config.k_opponents,
+        tc.k_teammates,
+        tc.k_opponents,
     )
 
     return Observations(own_vel=own_vel, teammates=teammates, opponents=opponents)
