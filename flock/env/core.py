@@ -92,63 +92,82 @@ def random_policy(n_agents: int) -> PolicyFn:
     return policy
 
 
+def run_episodes(
+    config: EnvConfig,
+    key: RngKey,
+    pred_policy: PolicyFn,
+    prey_policy: PolicyFn,
+    n_arenas: int,
+) -> Simulation:
+    """Run n_arenas episodes in parallel via vmap. Same config and policies, different seeds.
+
+    Returns a Simulation with batch dimension prepended:
+    e.g. states.predators.pos has shape (n_arenas, T, n_pred, 2).
+
+    Once done, state freezes — the scan runs for max_steps unconditionally
+    but stops mutating state after the episode ends.
+    """
+    def single_episode(key):
+        key, reset_key = jax.random.split(key)
+        init_state = reset(config, reset_key)
+
+        def scan_fn(carry, _):
+            state, done, key = carry
+            key, k1, k2 = jax.random.split(key, 3)
+
+            pred_obs = observe(config, state, "predators")
+            prey_obs = observe(config, state, "prey")
+
+            pred_a = pred_policy(pred_obs, k1)
+            prey_a = prey_policy(prey_obs, k2)
+
+            new_state, info = step(config, state, pred_a, prey_a)
+
+            # Freeze state once done
+            done = done | info.done
+            state = jax.tree.map(
+                lambda old, new: jnp.where(done, old, new),
+                state, new_state,
+            )
+
+            return (state, done, key), state
+
+        init_carry = (init_state, jnp.bool_(False), key)
+        _, states = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
+
+        # Prepend initial state
+        all_states = jax.tree.map(
+            lambda init, scanned: jnp.concatenate([init[None], scanned], axis=0),
+            init_state, states,
+        )
+
+        return Simulation(
+            config=config,
+            states=EnvStates(
+                predators=Agents(
+                    pos=all_states.predators.pos,
+                    vel=all_states.predators.vel,
+                    alive=all_states.predators.alive,
+                ),
+                prey=Agents(
+                    pos=all_states.prey.pos,
+                    vel=all_states.prey.vel,
+                    alive=all_states.prey.alive,
+                ),
+                step_id=all_states.step_id,
+            ),
+        )
+
+    keys = jax.random.split(key, n_arenas)
+    return jax.vmap(single_episode)(keys)
+
+
 def run_episode(
     config: EnvConfig,
     key: RngKey,
     pred_policy: PolicyFn,
     prey_policy: PolicyFn,
 ) -> Simulation:
-    """Run one episode via lax.scan. Returns a Simulation (config + time-stacked states).
-
-    Once done, state freezes — the scan runs for max_steps unconditionally
-    but stops mutating state after the episode ends.
-    """
-    key, reset_key = jax.random.split(key)
-    init_state = reset(config, reset_key)
-
-    def scan_fn(carry, _):
-        state, done, key = carry
-        key, k1, k2 = jax.random.split(key, 3)
-
-        pred_obs = observe(config, state, "predators")
-        prey_obs = observe(config, state, "prey")
-
-        pred_a = pred_policy(pred_obs, k1)
-        prey_a = prey_policy(prey_obs, k2)
-
-        new_state, info = step(config, state, pred_a, prey_a)
-
-        # Freeze state once done — keep old state, accumulate done flag
-        done = done | info.done
-        state = jax.tree.map(
-            lambda old, new: jnp.where(done, old, new),
-            state, new_state,
-        )
-
-        return (state, done, key), state
-
-    init_carry = (init_state, jnp.bool_(False), key)
-    _, states = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
-
-    # Prepend initial state
-    all_states = jax.tree.map(
-        lambda init, scanned: jnp.concatenate([init[None], scanned], axis=0),
-        init_state, states,
-    )
-
-    return Simulation(
-        config=config,
-        states=EnvStates(
-            predators=Agents(
-                pos=all_states.predators.pos,
-                vel=all_states.predators.vel,
-                alive=all_states.predators.alive,
-            ),
-            prey=Agents(
-                pos=all_states.prey.pos,
-                vel=all_states.prey.vel,
-                alive=all_states.prey.alive,
-            ),
-            step_id=all_states.step_id,
-        ),
-    )
+    """Run a single episode. Convenience wrapper around run_episodes."""
+    sim = run_episodes(config, key, pred_policy, prey_policy, n_arenas=1)
+    return jax.tree.map(lambda x: x[0], sim)
