@@ -1,16 +1,37 @@
 """Minimal PPO training loop for predator policy."""
 
+from typing import NamedTuple
+
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 import optax
 
-from flock.env.types import EnvConfig, Observations
+from flock.env.types import EnvConfig
 from flock.env.rules import Rules
 from flock.env.core import reset, step
 from flock.env.obs import observe
 from flock.env.physics import pairwise_distances
 from flock.train.ppo.policy import ActorCritic, flatten_obs
+
+
+class PPOConfig(NamedTuple):
+    """All PPO hyperparameters in one place."""
+    # GAE
+    gamma: float = 0.99
+    lam: float = 0.95
+    # Clipped surrogate
+    clip_eps: float = 0.2
+    # Loss coefficients
+    value_coeff: float = 0.5
+    entropy_coeff: float = 0.01
+    # Training loop
+    n_iters: int = 100
+    n_arenas: int = 128
+    n_epochs: int = 4
+    lr: float = 3e-4
+    max_grad_norm: float = 0.5
+    minibatch_size: int = 4096
 
 
 def _gaussian_log_prob(mean, log_std, actions):
@@ -20,8 +41,7 @@ def _gaussian_log_prob(mean, log_std, actions):
 
 
 def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, distance_coeff=1.0):
-    """Collect trajectories. Returns flat arrays over (n_arenas, T, n_predators)."""
-    n_teams = len(rules.teams)
+    """Collect trajectories. Returns flat arrays over (n_arenas, T, n_predators) + last_values for bootstrap."""
     prey_ps = prey_policy.init_state()
 
     def episode_step(carry, _):
@@ -70,38 +90,42 @@ def collect_rollout(env_config, rules, policy, prey_policy, key, n_arenas, dista
         key, reset_key = jax.random.split(key)
         init_state = reset(env_config, rules, reset_key)
         init_carry = (init_state, jnp.bool_(False), key, prey_ps)
-        _, trajectory = jax.lax.scan(episode_step, init_carry, None, length=env_config.max_steps)
-        return trajectory
+        (final_state, final_done, _, _), trajectory = jax.lax.scan(
+            episode_step, init_carry, None, length=env_config.max_steps,
+        )
+        # Bootstrap value: V(s_T) for truncated episodes, 0 if truly done
+        final_obs = observe(rules, env_config, final_state, 0)
+        _, _, last_value = policy.evaluate(final_obs)
+        last_value = jnp.where(final_done, 0.0, last_value)
+        return trajectory, last_value
 
     keys = jax.random.split(key, n_arenas)
     # obs, actions, log_probs, values, rewards, dones — each (n_arenas, T, ...)
-    return jax.vmap(single_episode)(keys)
+    trajectories, last_values = jax.vmap(single_episode)(keys)
+    return trajectories, last_values
 
 
-def compute_gae(rewards, values, dones, gamma=0.99, lam=0.95):
-    """GAE-lambda. All inputs: (T, n_agents). Returns advantages, returns."""
+def compute_gae(rewards, values, dones, last_value, cfg):
+    """GAE-lambda. All inputs: (T, n_agents). last_value: (n_agents,) bootstrap for truncation."""
+    gamma, lam = cfg.gamma, cfg.lam
     T = rewards.shape[0]
 
     def scan_fn(carry, t):
         next_value, gae = carry
-        # Reverse scan: t goes T-1, T-2, ..., 0
         idx = T - 1 - t
         delta = rewards[idx] + gamma * next_value * (1 - dones[idx, None]) - values[idx]
         gae = delta + gamma * lam * (1 - dones[idx, None]) * gae
         return (values[idx], gae), gae
 
     n_agents = rewards.shape[1]
-    _, advantages = jax.lax.scan(scan_fn, (jnp.zeros(n_agents), jnp.zeros(n_agents)), jnp.arange(T))
-    # Reverse back to normal time order
+    _, advantages = jax.lax.scan(scan_fn, (last_value, jnp.zeros(n_agents)), jnp.arange(T))
     advantages = advantages[::-1]
     returns = advantages + values
     return advantages, returns
 
 
-def ppo_loss(policy, obs_flat, actions, old_log_probs, advantages, returns, clip_eps=0.2):
+def ppo_loss(policy, obs_flat, actions, old_log_probs, advantages, returns, cfg):
     """PPO clipped surrogate loss + value loss. All inputs: (batch, ...)."""
-    # Reconstruct Observations for evaluate — obs_flat is already (batch, obs_dim)
-    # We need to call trunk + heads directly on flat obs
     h = jax.vmap(policy.trunk)(obs_flat)
     mean = jax.vmap(policy.actor_mean)(h)
     log_std = jnp.broadcast_to(policy.actor_log_std, mean.shape)
@@ -113,7 +137,7 @@ def ppo_loss(policy, obs_flat, actions, old_log_probs, advantages, returns, clip
     # Clipped surrogate
     adv_normalized = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
     surr1 = ratio * adv_normalized
-    surr2 = jnp.clip(ratio, 1 - clip_eps, 1 + clip_eps) * adv_normalized
+    surr2 = jnp.clip(ratio, 1 - cfg.clip_eps, 1 + cfg.clip_eps) * adv_normalized
     policy_loss = -jnp.minimum(surr1, surr2).mean()
 
     # Value loss
@@ -122,14 +146,14 @@ def ppo_loss(policy, obs_flat, actions, old_log_probs, advantages, returns, clip
     # Entropy bonus
     entropy = (0.5 * jnp.log(2 * jnp.pi * jnp.e) + log_std).sum(axis=-1).mean()
 
-    return policy_loss + 0.5 * value_loss - 0.01 * entropy
+    return policy_loss + cfg.value_coeff * value_loss - cfg.entropy_coeff * entropy
 
 
 @eqx.filter_jit
-def train_step(policy, opt_state, obs_flat, actions, old_log_probs, advantages, returns, optimizer):
+def train_step(policy, opt_state, obs_flat, actions, old_log_probs, advantages, returns, optimizer, cfg):
     """One PPO gradient step."""
     loss, grads = eqx.filter_value_and_grad(ppo_loss)(
-        policy, obs_flat, actions, old_log_probs, advantages, returns,
+        policy, obs_flat, actions, old_log_probs, advantages, returns, cfg,
     )
     updates, new_opt_state = optimizer.update(grads, opt_state, eqx.filter(policy, eqx.is_array))
     new_policy = eqx.apply_updates(policy, updates)
@@ -142,35 +166,34 @@ def train(
     policy: ActorCritic,
     prey_policy,
     key,
-    n_iters: int = 100,
-    n_arenas: int = 32,
-    n_epochs: int = 4,
-    lr: float = 3e-4,
+    cfg: PPOConfig,
 ):
     """Main PPO training loop."""
-    optimizer = optax.adam(lr)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(cfg.max_grad_norm),
+        optax.adam(cfg.lr),
+    )
     opt_state = optimizer.init(eqx.filter(policy, eqx.is_array))
 
-    for i in range(n_iters):
+    for i in range(cfg.n_iters):
         key, rollout_key = jax.random.split(key)
 
         # Collect rollout
-        obs, actions, log_probs, values, rewards, dones, catch_rewards = collect_rollout(
-            env_config, rules, policy, prey_policy, rollout_key, n_arenas,
+        (obs, actions, log_probs, values, rewards, dones, catch_rewards), last_values = collect_rollout(
+            env_config, rules, policy, prey_policy, rollout_key, cfg.n_arenas,
         )
-        # obs is a NamedTuple of (n_arenas, T, n_agents, ...) — flatten obs for loss
-        obs_flat = jnp.concatenate([
-            obs.own_vel,
-            obs.teammates.reshape(*obs.own_vel.shape[:2], obs.own_vel.shape[2], -1),
-            obs.opponents.reshape(*obs.own_vel.shape[:2], obs.own_vel.shape[2], -1),
-        ], axis=-1)  # (n_arenas, T, n_agents, obs_dim)
+
+        # Flatten obs — (n_arenas, T, n_agents, obs_dim)
+        obs_flat = jax.vmap(jax.vmap(flatten_obs))(obs)
 
         # shapes: (n_arenas, T, n_agents, ...) → flatten to (n_arenas * T * n_agents, ...)
         na, T, n_pred = actions.shape[:3]
 
-        # Compute GAE per arena — vmap over arenas
+        # Compute GAE per arena with bootstrap
         dones_float = dones.astype(jnp.float32)  # (n_arenas, T)
-        advantages, returns = jax.vmap(compute_gae)(rewards, values, dones_float)
+        advantages, returns = jax.vmap(lambda r, v, d, lv: compute_gae(r, v, d, lv, cfg))(
+            rewards, values, dones_float, last_values,
+        )
         # (n_arenas, T, n_agents)
 
         # Flatten everything to (batch, ...)
@@ -181,10 +204,17 @@ def train(
         adv_b = advantages.reshape(batch_size)
         ret_b = returns.reshape(batch_size)
 
-        for _epoch in range(n_epochs):
-            policy, opt_state, loss = train_step(
-                policy, opt_state, obs_b, act_b, lp_b, adv_b, ret_b, optimizer,
-            )
+        for _epoch in range(cfg.n_epochs):
+            # Shuffle and split into minibatches
+            key, shuffle_key = jax.random.split(key)
+            perm = jax.random.permutation(shuffle_key, batch_size)
+            for start in range(0, batch_size, cfg.minibatch_size):
+                idx = perm[start:start + cfg.minibatch_size]
+                policy, opt_state, loss = train_step(
+                    policy, opt_state,
+                    obs_b[idx], act_b[idx], lp_b[idx], adv_b[idx], ret_b[idx],
+                    optimizer, cfg,
+                )
 
         mean_reward = rewards.sum(axis=1).mean()
         mean_catches = catch_rewards.sum(axis=1).mean()
