@@ -1,5 +1,6 @@
-"""Ugly-but-useful matplotlib replay for physics sanity checking."""
+# (ugly-but-useful)
 
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
@@ -42,8 +43,38 @@ def animate(sim: Simulation, interval: int = 50):
     ani = animation.FuncAnimation(
         fig, update, frames=n_frames, interval=interval, blit=True,
     )
-    plt.show()
     return ani
+
+
+def plot_stats(sim: Simulation):
+    """Plot prey count and cumulative rewards over time."""
+    infos = sim.infos
+    T = len(infos.done)
+
+    prey_alive = sim.states.prey.alive[1:]  # skip t=0 to align with infos
+    prey_count = prey_alive.sum(axis=-1)    # (T,)
+
+    pred_reward_per_step = infos.pred_reward.sum(axis=-1)  # (T,) total across predators
+    prey_reward_per_step = infos.prey_reward.sum(axis=-1)  # (T,) total across prey
+
+    pred_cumulative = jnp.cumsum(pred_reward_per_step)
+    prey_cumulative = jnp.cumsum(prey_reward_per_step)
+
+    fig, axes = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
+
+    axes[0].plot(prey_count, color="dodgerblue")
+    axes[0].set_ylabel("prey alive")
+    axes[0].set_title("prey count over time")
+
+    axes[1].plot(pred_cumulative, color="red", label="predators")
+    axes[1].plot(prey_cumulative, color="dodgerblue", label="prey")
+    axes[1].set_ylabel("cumulative reward")
+    axes[1].set_xlabel("step")
+    axes[1].legend()
+    axes[1].set_title("cumulative reward over time")
+
+    fig.tight_layout()
+    return fig
 
 
 if __name__ == "__main__":
@@ -59,3 +90,4 @@ if __name__ == "__main__":
         prey_policy=RandomPolicy(config.n_prey),
     )
     animate(sim)
+    plt.show()

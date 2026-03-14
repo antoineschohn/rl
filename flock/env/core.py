@@ -1,9 +1,8 @@
 import jax
 import jax.numpy as jnp
 
-from typing import NamedTuple
 
-from flock.env.types import Agent, Agents, EnvConfig, EnvState, EnvStates, Observations, Policy, PolicyState, RngKey, Simulation
+from flock.env.types import Agent, Agents, EnvConfig, EnvState, EnvStates, Observations, Policy, PolicyState, RngKey, Simulation, StepInfo
 from flock.env.physics import integrate, wrap_position, clamp_magnitude
 from flock.env.reward import compute_catches, predator_reward, prey_reward
 from flock.env.obs import observe
@@ -29,11 +28,6 @@ def reset(config: EnvConfig, key: RngKey) -> EnvState:
     )
 
 
-class StepInfo(NamedTuple):
-    """Output of a single environment step."""
-    pred_reward: jnp.ndarray  # (n_predators,)
-    prey_reward: jnp.ndarray  # (n_prey,)
-    done: jnp.ndarray         # scalar bool
 
 def step(config: EnvConfig, state: EnvState, pred_actions: jax.Array, prey_actions: jax.Array) -> tuple[EnvState, StepInfo]:
     """One environment step. Pure function: (config, state, actions) -> (state, info)."""
@@ -131,12 +125,12 @@ def run_episodes(
                 state, new_state,
             )
 
-            return (state, done, key, ps_pred, ps_prey), state
+            return (state, done, key, ps_pred, ps_prey), (state, info)
 
         init_carry = (init_state, jnp.bool_(False), key, pred_ps_init, prey_ps_init)
-        _, states = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
+        _, (states, infos) = jax.lax.scan(scan_fn, init_carry, None, length=config.max_steps)
 
-        # Prepend initial state
+        # Prepend initial state (no info for t=0)
         all_states = jax.tree.map(
             lambda init, scanned: jnp.concatenate([init[None], scanned], axis=0),
             init_state, states,
@@ -157,6 +151,7 @@ def run_episodes(
                 ),
                 step_id=all_states.step_id,
             ),
+            infos=infos,  # StepInfo stacked over time: (T, ...)
         )
 
     keys = jax.random.split(key, n_arenas)

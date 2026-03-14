@@ -82,7 +82,15 @@ class EnvStates(NamedTuple):
     step_id: jnp.ndarray  # (T,)
 
 
+class StepInfo(NamedTuple):
+    """Output of a single environment step."""
+    pred_reward: jnp.ndarray  # (n_predators,)
+    prey_reward: jnp.ndarray  # (n_prey,)
+    done: jnp.ndarray         # scalar bool
+
+
 class Simulation(NamedTuple):
-    """A complete simulation: config + recorded states."""
+    """A complete simulation: config + recorded states + step infos."""
     config: EnvConfig
-    states: EnvStates
+    states: EnvStates    # (T+1, ...) — includes initial state at t=0
+    infos: StepInfo      # (T, ...) — infos[t] = step(states[t]).info
