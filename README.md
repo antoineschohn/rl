@@ -1,36 +1,45 @@
-Multi-Agent Predator-Prey
-  
-Core concept: Predators learn to coordinate hunts, prey learn evasion strategies. Both improve over time through co-evolution / self-play.
+Multi-agent predator-prey
 
-Key Design Decisions
+[Download ZIP](https://github.com/erik-helmers/rl/archive/refs/heads/master.zip)
 
-  1. Environment
-  - 2D arena 
-  - Continuous 
-  - (planned) Obstacles/terrain
+## Setup
 
-  2. Agent Design
-  - 10s. (planned) 100s of agents
-  - Observation: local vision cone. (planned) Communication between teammate
-  - Acceleration/steering.
-  - Shared policy. (planned) subgroups 
+### 1. Install uv
 
-  3. Training
-  - JAX-based for massive parallelism (thousands of arenas simultaneously)
-  - PPO with parameter sharing per team is the standard starting point
-  - Co-training: both teams improve against each other
+**macOS / Linux:**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
 
-  4. What Makes It Wow
-  - Emergent formation hunting (pincer moves, herding)
-  - Prey developing schooling/flocking behavior defensively
-  - Clear generational improvement visible in replays
-  - Live dashboard showing population dynamics, reward curves
+**Windows:**
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
-  Proposed Starting Point
+See https://docs.astral.sh/uv/getting-started/installation/ for other methods.
 
-  - 2D continuous arena, top-down
-  - 3-5 predators vs 10-20 prey
-  - Local observations (vision radius), continuous actions (velocity)
-  - Shared policy per team, PPO
-  - JAX/Brax or custom JAX env for parallelism
+### 2. Install dependencies
+
+```bash
+uv sync
+uv pip install -e .
+```
+
+### 3. Run tests
+
+```bash
+uv run pytest
+```
+
+
+## Project structure
+
+```
+flock/
+  env/          # Environment, physics, rewards 
+  train/        # PPO, policy networks, training loop
+  web/          # Visualization frontend (TBD)
+tests/
+notebooks/
+```
 

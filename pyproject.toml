@@ -9,13 +9,22 @@ dependencies = [
     "equinox",
     "optax",
     "jaxtyping",
-    "matplotlib",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "matplotlib",
+    "ipympl>=0.10.0",
+    "ipywidgets>=8.1.8",
+    "jupyterlab>=4.5.6",
+    "pyright>=1.1.408",
     "pytest>=9.0.2",
+    "seaborn>=0.13.2",
 ]
