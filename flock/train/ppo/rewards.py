@@ -42,3 +42,19 @@ class PredatorReward(eqx.Module):
             env_config, rules, state, new_state, info, team_idx,
         )
         return catch + distance
+
+
+class PreyReward(eqx.Module):
+    """Survival bonus + distance shaping (maximize distance from predators)."""
+    survival_coeff: float = 1.0
+    distance_coeff: float = 1.0
+
+    def __call__(self, env_config, rules, state, new_state, info, team_idx):
+        team = new_state.teams[team_idx]
+        # +1 per step alive, normalized by max_steps
+        survival = self.survival_coeff * team.alive.astype(jnp.float32) / env_config.max_steps
+        # Positive nearest-opponent distance (reward being far from predators)
+        distance = DistanceReward(coeff=-self.distance_coeff)(
+            env_config, rules, state, new_state, info, team_idx,
+        )
+        return survival + distance
