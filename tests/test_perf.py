@@ -60,7 +60,7 @@ def _make_ppo_runner(n_iters=2, n_arenas=32):
     cfg = PPOConfig(n_iters=n_iters, n_arenas=n_arenas, n_epochs=1)
 
     key = jax.random.key(0)
-    policy = make_policy(rules.teams[0].k_teammates, rules.teams[0].k_opponents, key=key)
+    policy = make_policy(rules.teams[0], key=key)
     prey_policy = FleePredators(rules.teams[1])
     trainees = (Trainee(team_idx=0, reward_fn=PredatorReward()),)
 

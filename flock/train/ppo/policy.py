@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 
-from flock.env.types import Observations, Policy, PolicyState, RngKey
+from flock.env.types import Observations, Policy, PolicyState, RngKey, TeamConfig
 
 
 def obs_dim(k_teammates: int, k_opponents: int) -> int:
@@ -29,11 +29,12 @@ class ActorCritic(Policy):
     actor_log_std: jax.Array  # learnable (2,) parameter
     critic: eqx.nn.Linear
 
-    def __init__(self, in_dim: int, hidden: int, *, key: RngKey):
+    def __init__(self, team: TeamConfig, hidden: int, *, key: RngKey):
+        in_dim = obs_dim(team.k_teammates, team.k_opponents)
         k1, k2, k3 = jax.random.split(key, 3)
         self.trunk = eqx.nn.MLP(in_dim, hidden, width_size=hidden, depth=2, key=k1)
         self.actor_mean = eqx.nn.Linear(hidden, 2, key=k2)
-        self.actor_log_std = jnp.ones(2)  # std ≈ 2.7, reasonable for max_accel ~ 8
+        self.actor_log_std = jnp.full(2, jnp.log(team.max_accel / 3))
         self.critic = eqx.nn.Linear(hidden, 1, key=k3)
 
     def evaluate(self, obs: Observations) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
@@ -51,6 +52,6 @@ class ActorCritic(Policy):
         return actions, state
 
 
-def make_policy(k_teammates: int, k_opponents: int, *, hidden: int = 64, key: RngKey) -> ActorCritic:
-    """Create an ActorCritic policy for the given observation shape."""
-    return ActorCritic(obs_dim(k_teammates, k_opponents), hidden, key=key)
+def make_policy(team: TeamConfig, *, hidden: int = 64, key: RngKey) -> ActorCritic:
+    """Create an ActorCritic policy for the given team."""
+    return ActorCritic(team, hidden, key=key)
