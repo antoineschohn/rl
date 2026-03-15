@@ -31,12 +31,39 @@ class PPOConfig(NamedTuple):
     lr: float = 3e-4
     max_grad_norm: float = 0.5
     minibatch_size: int = 4096
+    # Distance-shaping decay schedule (for reward modules that support it)
+    reward_distance_decay: bool = True
+    reward_distance_final_scale: float = 0.05
+    reward_distance_decay_power: float = 2.0
 
 
 class Trainee(NamedTuple):
     """Specifies which team to train and with what reward."""
     team_idx: int
     reward_fn: eqx.Module  # callable (env_config, rules, state, new_state, info, team_idx) -> (n_agents,)
+
+
+def _distance_scale(iter_idx: int, cfg: PPOConfig) -> float:
+    """Distance shaping scale for current iteration.
+
+    Decays from 1.0 at iter 0 to `reward_distance_final_scale` at the end,
+    with stronger attenuation in the first half when power > 1.
+    """
+    if (not cfg.reward_distance_decay) or cfg.n_iters <= 1:
+        return 1.0
+
+    progress = iter_idx / (cfg.n_iters - 1)
+    progress = min(max(progress, 0.0), 1.0)
+    curve = (1.0 - progress) ** cfg.reward_distance_decay_power
+    min_scale = cfg.reward_distance_final_scale
+    return min_scale + (1.0 - min_scale) * curve
+
+
+def _maybe_scale_reward_fn(reward_fn: eqx.Module, scale: float) -> eqx.Module:
+    """Scale distance shaping if the reward module supports it."""
+    if hasattr(reward_fn, "with_distance_scale"):
+        return reward_fn.with_distance_scale(scale)
+    return reward_fn
 
 
 def _gaussian_log_prob(mean, log_std, actions):
@@ -251,14 +278,23 @@ def train(
     for i in range(cfg.n_iters):
         key, rollout_key = jax.random.split(key)
 
+        distance_scale = _distance_scale(i, cfg)
+        effective_trainees = tuple(
+            Trainee(
+                team_idx=t.team_idx,
+                reward_fn=_maybe_scale_reward_fn(t.reward_fn, distance_scale),
+            )
+            for t in trainees
+        )
+
         # Collect rollout for all teams simultaneously
         per_team = collect_rollout(
-            env_config, rules, policies, trainees, rollout_key, cfg.n_arenas,
+            env_config, rules, policies, effective_trainees, rollout_key, cfg.n_arenas,
         )
 
         # Update each trainee's policy
         losses = []
-        for ti, t in enumerate(trainees):
+        for ti, t in enumerate(effective_trainees):
             (obs, actions, log_probs, values, rewards, dones, _scores), last_values = per_team[ti]
 
             policies_list = list(policies)
@@ -272,7 +308,7 @@ def train(
 
         # Logging
         parts = [f"iter {i:4d}"]
-        for ti, t in enumerate(trainees):
+        for ti, t in enumerate(effective_trainees):
             (_obs, _act, _lp, _val, rewards, _dones, scores), _lv = per_team[ti]
             name = rules.teams[t.team_idx].name
             mean_reward = rewards.sum(axis=1).mean()

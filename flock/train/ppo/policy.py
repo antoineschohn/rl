@@ -8,15 +8,17 @@ from flock.env.types import Observations, Policy, PolicyState, RngKey, TeamConfi
 
 
 def obs_dim(k_teammates: int, k_opponents: int) -> int:
-    """Flat observation size: own_vel(2) + teammates(k*4) + opponents(k*4)."""
-    return 2 + k_teammates * 4 + k_opponents * 4
+    """Flat observation size: own_pos(2) + own_vel(2) + in_bush(1) + teammates + opponents."""
+    return 5 + k_teammates * 4 + k_opponents * 4
 
 
 def flatten_obs(obs: Observations) -> jnp.ndarray:
     """Flatten Observations into (n_agents, obs_dim)."""
-    n = obs.own_vel.shape[0]
+    n = obs.own_pos.shape[0]
     return jnp.concatenate([
+        obs.own_pos,                          # (n, 2)
         obs.own_vel,                          # (n, 2)
+        obs.in_bush,                          # (n, 1)
         obs.teammates.reshape(n, -1),         # (n, k_t * 4)
         obs.opponents.reshape(n, -1),         # (n, k_o * 4)
     ], axis=-1)

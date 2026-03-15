@@ -21,6 +21,10 @@ class DistanceReward(eqx.Module):
     """Negative nearest-opponent distance, normalized by max_steps."""
     coeff: float = 1.0
 
+    def with_distance_scale(self, scale: float):
+        """Return a copy with distance coeff scaled by `scale`."""
+        return DistanceReward(coeff=self.coeff * scale)
+
     def __call__(self, env_config, rules, state, new_state, info, team_idx):
         opp_idx = 1 - team_idx
         team = new_state.teams[team_idx]
@@ -36,6 +40,10 @@ class PredatorReward(eqx.Module):
     """Catch score + distance shaping. Reproduces the original hardcoded behavior."""
     distance_coeff: float = 1.0
 
+    def with_distance_scale(self, scale: float):
+        """Return a copy with distance shaping scaled by `scale`."""
+        return PredatorReward(distance_coeff=self.distance_coeff * scale)
+
     def __call__(self, env_config, rules, state, new_state, info, team_idx):
         catch = EnvReward()(env_config, rules, state, new_state, info, team_idx)
         distance = DistanceReward(coeff=self.distance_coeff)(
@@ -48,6 +56,16 @@ class PreyReward(eqx.Module):
     """Survival bonus + distance shaping (maximize distance from predators)."""
     survival_coeff: float = 1.0
     distance_coeff: float = 1.0
+
+    def with_distance_scale(self, scale: float):
+        """Return a copy with distance shaping scaled by `scale`.
+
+        Survival coefficient is intentionally kept unchanged.
+        """
+        return PreyReward(
+            survival_coeff=self.survival_coeff,
+            distance_coeff=self.distance_coeff * scale,
+        )
 
     def __call__(self, env_config, rules, state, new_state, info, team_idx):
         team = new_state.teams[team_idx]

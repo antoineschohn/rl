@@ -26,14 +26,18 @@ class Agents(NamedTuple):
 
 class Observation(NamedTuple):
     """What one agent sees."""
+    own_pos: jnp.ndarray        # (2,)
     own_vel: jnp.ndarray        # (2,)
+    in_bush: jnp.ndarray        # (1,)
     teammates: jnp.ndarray      # (k_teammates, 4) — relative (dx, dy, dvx, dvy)
     opponents: jnp.ndarray      # (k_opponents, 4) — relative (dx, dy, dvx, dvy)
 
 
 class Observations(NamedTuple):
     """What a whole team sees (batched)."""
+    own_pos: jnp.ndarray        # (n_agents, 2)
     own_vel: jnp.ndarray        # (n_agents, 2)
+    in_bush: jnp.ndarray        # (n_agents, 1)
     teammates: jnp.ndarray      # (n_agents, k_teammates, 4)
     opponents: jnp.ndarray      # (n_agents, k_opponents, 4)
 

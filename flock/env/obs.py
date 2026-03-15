@@ -20,18 +20,33 @@ def _k_nearest(deltas: jnp.ndarray, rel_vel: jnp.ndarray, alive: jnp.ndarray, k:
     Returns:
         (k, 4) — relative pos + vel of k-nearest, zero-padded
     """
+    n_others = deltas.shape[0]
+    width = deltas.shape[-1] + rel_vel.shape[-1]
+    if k == 0:
+        return jnp.zeros((0, width), dtype=deltas.dtype)
+
+    if n_others == 0:
+        return jnp.zeros((k, width), dtype=deltas.dtype)
+
     dists = jnp.linalg.norm(deltas, axis=-1)
     dists = jnp.where(alive, dists, jnp.inf)
-    nearest_idx = jnp.argsort(dists)[:k]
+    nearest_idx = jnp.argsort(dists)
+    take = min(k, n_others)
+    nearest_idx = nearest_idx[:take]
+
     rel_pos = deltas[nearest_idx]
     rel_v = rel_vel[nearest_idx]
     result = jnp.concatenate([rel_pos, rel_v], axis=-1)
     valid = alive[nearest_idx][:, None]
-    return result * valid
+    result = result * valid
+
+    pad = k - take
+    if pad > 0:
+        result = jnp.pad(result, ((0, pad), (0, 0)))
+    return result
 
 
 def _observe_one_agent(
-    own_vel: jnp.ndarray,
     teammate_deltas: jnp.ndarray,
     teammate_rel_vel: jnp.ndarray,
     teammate_alive: jnp.ndarray,
@@ -40,11 +55,11 @@ def _observe_one_agent(
     opponent_alive: jnp.ndarray,
     k_teammates: int,
     k_opponents: int,
-) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Build observation for a single agent. Designed to be vmapped."""
     teammates = _k_nearest(teammate_deltas, teammate_rel_vel, teammate_alive, k_teammates)
     opponents = _k_nearest(opponent_deltas, opponent_rel_vel, opponent_alive, k_opponents)
-    return own_vel, teammates, opponents
+    return teammates, opponents
 
 
 def _bush_arrays(env_config: EnvConfig, dtype: jnp.dtype) -> tuple[jnp.ndarray, jnp.ndarray]:
@@ -112,11 +127,10 @@ def observe(rules: Rules, env_config: EnvConfig, state: EnvState, team_idx: int)
     opponent_visible = _visibility_mask(us_bushes, others_bushes)
     opponent_alive = jnp.broadcast_to(others_alive[None, :], (n_us, n_others)) & opponent_visible
 
-    own_vel, teammates, opponents = jax.vmap(
+    teammates, opponents = jax.vmap(
         _observe_one_agent,
-        in_axes=(0, 0, 0, 0, 0, 0, 0, None, None),
+        in_axes=(0, 0, 0, 0, 0, 0, None, None),
     )(
-        us.vel,
         teammate_deltas,
         teammate_rel_vel,
         teammate_alive,
@@ -127,4 +141,11 @@ def observe(rules: Rules, env_config: EnvConfig, state: EnvState, team_idx: int)
         tc.k_opponents,
     )
 
-    return Observations(own_vel=own_vel, teammates=teammates, opponents=opponents)
+    in_bush = jnp.any(us_bushes, axis=-1, keepdims=True).astype(us.pos.dtype)
+    return Observations(
+        own_pos=us.pos,
+        own_vel=us.vel,
+        in_bush=in_bush,
+        teammates=teammates,
+        opponents=opponents,
+    )
