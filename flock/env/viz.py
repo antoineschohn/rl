@@ -3,6 +3,7 @@
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.patches import Circle
 
 from flock.env.types import Simulation
 
@@ -21,6 +22,19 @@ def animate(sim: Simulation, interval: int = 50):
     ax.set_aspect("equal")
     ax.set_facecolor("#1a1a2e")
     fig.patch.set_facecolor("#0f0f23")
+
+    for bush in env_config.bushes:
+        ax.add_patch(
+            Circle(
+                (bush.x, bush.y),
+                bush.radius,
+                facecolor="#2f6f3e",
+                edgecolor="#8fca7d",
+                alpha=0.35,
+                linewidth=1.0,
+                zorder=0,
+            )
+        )
 
     scatters = []
     for i, tc in enumerate(rules.teams):

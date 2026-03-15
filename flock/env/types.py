@@ -64,11 +64,19 @@ class TeamConfig(NamedTuple):
     k_opponents: int = 5
 
 
+class Bush(NamedTuple):
+    """Circular arena region that hides occupants from agents outside it."""
+    x: float
+    y: float
+    radius: float
+
+
 class EnvConfig(NamedTuple):
     """Arena and physics parameters."""
     arena_size: float = 10.0
     dt: float = 0.05
     max_steps: int = 500
+    bushes: tuple[Bush, ...] = ()
 
 
 class EnvState(NamedTuple):

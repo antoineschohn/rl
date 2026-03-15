@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from flock.env.types import EnvConfig
+from flock.env.types import Bush, EnvConfig
 from flock.env.rules import PredatorPrey
 from flock.env.core import reset
 from flock.env.obs import observe
@@ -45,3 +45,41 @@ def test_observe_dead_agents_zeroed():
     state = state._replace(teams=(state.teams[0], dead_prey))
     obs = observe(inter, cfg, state, 0)
     assert jnp.allclose(obs.opponents, 0.0)
+
+
+def test_observe_hides_opponents_inside_bush_from_outside_agents():
+    cfg, inter = _setup(n_predators=1, n_prey=1, k_opponents=1)
+    cfg = cfg._replace(bushes=(Bush(x=5.0, y=5.0, radius=1.0),))
+    state = reset(cfg, inter, jax.random.key(0))
+    state = state._replace(teams=(
+        state.teams[0]._replace(pos=jnp.array([[1.0, 1.0]])),
+        state.teams[1]._replace(pos=jnp.array([[5.0, 5.0]])),
+    ))
+
+    obs = observe(inter, cfg, state, 0)
+    assert jnp.allclose(obs.opponents, 0.0)
+
+
+def test_observe_shows_agents_sharing_same_bush():
+    cfg, inter = _setup(n_predators=1, n_prey=1, k_opponents=1)
+    cfg = cfg._replace(bushes=(Bush(x=5.0, y=5.0, radius=1.5),))
+    state = reset(cfg, inter, jax.random.key(0))
+    state = state._replace(teams=(
+        state.teams[0]._replace(pos=jnp.array([[5.0, 5.5]])),
+        state.teams[1]._replace(pos=jnp.array([[5.5, 5.0]])),
+    ))
+
+    obs = observe(inter, cfg, state, 0)
+    assert not jnp.allclose(obs.opponents, 0.0)
+
+
+def test_observe_hides_teammates_inside_bush_from_outside_agents():
+    cfg, inter = _setup(n_predators=2, n_prey=1, k_teammates=1)
+    cfg = cfg._replace(bushes=(Bush(x=5.0, y=5.0, radius=1.0),))
+    state = reset(cfg, inter, jax.random.key(0))
+    predators = state.teams[0]._replace(pos=jnp.array([[1.0, 1.0], [5.0, 5.0]]))
+    state = state._replace(teams=(predators, state.teams[1]))
+
+    obs = observe(inter, cfg, state, 0)
+    assert jnp.allclose(obs.teammates[0], 0.0)
+    assert not jnp.allclose(obs.teammates[1], 0.0)

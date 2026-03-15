@@ -10,7 +10,18 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from flock.env.types import Agents, EnvConfig, EnvStates, StepInfo
+from flock.env.types import Agents, Bush, EnvConfig, EnvStates, StepInfo
+
+
+def _env_config_to_dict(env_config: EnvConfig) -> dict:
+    data = env_config._asdict()
+    data["bushes"] = [b._asdict() for b in env_config.bushes]
+    return data
+
+
+def _env_config_from_dict(data: dict) -> EnvConfig:
+    bushes = tuple(Bush(**b) for b in data.get("bushes", []))
+    return EnvConfig(**{**data, "bushes": bushes})
 
 
 def save(sim, path):
@@ -31,7 +42,7 @@ def save(sim, path):
     arrays["infos/done"] = np.asarray(sim.infos.done)
 
     # Save env_config as JSON string in a separate sidecar
-    meta = {"env_config": sim.env_config._asdict(), "n_teams": len(sim.states.teams)}
+    meta = {"env_config": _env_config_to_dict(sim.env_config), "n_teams": len(sim.states.teams)}
     meta_path = path.with_suffix(".json")
     meta_path.write_text(json.dumps(meta))
 
@@ -48,7 +59,7 @@ def load(path):
     path = Path(path)
     meta_path = path.with_suffix(".json")
     meta = json.loads(meta_path.read_text())
-    env_config = EnvConfig(**meta["env_config"])
+    env_config = _env_config_from_dict(meta["env_config"])
     n_teams = meta["n_teams"]
 
     data = np.load(path, allow_pickle=False)

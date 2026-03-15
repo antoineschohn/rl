@@ -1,14 +1,18 @@
 import jax
 import jax.numpy as jnp
 
-from flock.env import EnvConfig, RandomPolicy, run_episode, save, load
+from flock.env import Bush, EnvConfig, RandomPolicy, run_episode, save, load
 from flock.env.rules import PredatorPrey
 
 
 def test_save_load_roundtrip(tmp_path):
     rules = PredatorPrey(n_predators=3, n_prey=5)
-    sim = run_episode(EnvConfig(max_steps=10), rules, jax.random.key(0),
-                      (RandomPolicy(rules.teams[0]), RandomPolicy(rules.teams[1])))
+    sim = run_episode(
+        EnvConfig(max_steps=10, bushes=(Bush(x=2.0, y=3.0, radius=1.0),)),
+        rules,
+        jax.random.key(0),
+        (RandomPolicy(rules.teams[0]), RandomPolicy(rules.teams[1])),
+    )
 
     path = tmp_path / "sim.npz"
     save(sim, path)
