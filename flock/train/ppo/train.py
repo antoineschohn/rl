@@ -36,7 +36,7 @@ class PPOConfig(NamedTuple):
 class Trainee(NamedTuple):
     """Specifies which team to train and with what reward."""
     team_idx: int
-    reward_fn: object  # callable (env_config, rules, state, new_state, info, team_idx) -> (n_agents,)
+    reward_fn: eqx.Module  # callable (env_config, rules, state, new_state, info, team_idx) -> (n_agents,)
 
 
 def _gaussian_log_prob(mean, log_std, actions):
@@ -45,17 +45,16 @@ def _gaussian_log_prob(mean, log_std, actions):
     return -0.5 * (jnp.log(2 * jnp.pi) + 2 * log_std + (actions - mean) ** 2 / var).sum(axis=-1)
 
 
+@eqx.filter_jit
 def collect_rollout(env_config, rules, policies, trainees, key, n_arenas):
     """Collect trajectories for all trainees from shared rollouts.
 
     Returns:
-        per_team: list of (trajectory, last_values) per trainee
-        env_scores: (n_arenas, T, n_teams_in_env) raw env scores for logging
+        per_team: tuple of (trajectory, last_values) per trainee
     """
     n_teams = len(rules.teams)
+    n_trainees = len(trainees)
     policy_states = tuple(p.init_state() for p in policies)
-
-    trainee_indices = [t.team_idx for t in trainees]
 
     def episode_step(carry, _):
         state, done, key, pstates = carry
@@ -71,7 +70,7 @@ def collect_rollout(env_config, rules, policies, trainees, key, n_arenas):
         team_actions = tuple(a for a, _ in actions_and_states)
         new_pstates = tuple(s for _, s in actions_and_states)
 
-        # For trainees that are ActorCritic, get value estimates and log probs
+        # For trainees, get value estimates and log probs
         trainee_data = []
         for t in trainees:
             i = t.team_idx
@@ -129,11 +128,8 @@ def collect_rollout(env_config, rules, policies, trainees, key, n_arenas):
 
     keys = jax.random.split(key, n_arenas)
     trajectories, last_values = jax.vmap(single_episode)(keys)
-    # trajectories: tuple of n_trainees, each element is tuple of arrays (n_arenas, T, ...)
-    # last_values: tuple of n_trainees, each (n_arenas, n_agents)
 
-    per_team = [(trajectories[i], last_values[i]) for i in range(len(trainees))]
-    return per_team
+    return tuple((trajectories[i], last_values[i]) for i in range(n_trainees))
 
 
 def compute_gae(rewards, values, dones, last_value, cfg):
@@ -230,7 +226,7 @@ def train(
     env_config: EnvConfig,
     rules: Rules,
     policies: tuple[Policy, ...],
-    trainees: list[Trainee],
+    trainees: tuple[Trainee, ...],
     key,
     cfg: PPOConfig,
 ):
